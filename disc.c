@@ -34,6 +34,7 @@ typedef struct
 } disk;
 
 const int block_size = 4096;
+const int stats_size = 24;
 
 disk *create_disk(int nbytes);
 int read_block(disk *diskptr, int blocknr, void *block_data);
@@ -44,14 +45,12 @@ int main() {}
 
 disk *create_disk(int nbytes)
 {
-    nbytes += 24;
-
     disk *diskptr = malloc(sizeof(disk));
 
     diskptr->size = nbytes;
     diskptr->reads = 0;
     diskptr->writes = 0;
-    diskptr->blocks = nbytes / block_size;
+    diskptr->blocks = (nbytes - stats_size) / block_size;
 
     diskptr->block_arr = malloc(sizeof(char **) * diskptr->blocks);
     if (diskptr->block_arr == NULL)
@@ -69,6 +68,8 @@ disk *create_disk(int nbytes)
             return NULL;
         }
     }
+
+    printf("[INFO]: Disk created successfully\n");
     return diskptr;
 }
 
@@ -88,6 +89,7 @@ int read_block(disk *diskptr, int blocknr, void *block_data)
 
     memcpy(block_data, diskptr->block_arr[blocknr], block_size);
     diskptr->reads++;
+    printf("[INFO]: Block read successfully\n");
     return 0;
 }
 
@@ -101,6 +103,7 @@ int write_block(disk *diskptr, int blocknr, void *block_data)
 
     memcpy(diskptr->block_arr[blocknr], block_data, block_size);
     diskptr->writes++;
+    printf("[INFO]: Block written successfully\n");
     return 0;
 }
 
@@ -112,5 +115,6 @@ int free_disk(disk *diskptr)
     }
     free(diskptr->block_arr);
     free(diskptr);
+    printf("[INFO]: Disk freed successfully\n");
     return 0;
 }
