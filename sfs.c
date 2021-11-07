@@ -100,12 +100,6 @@ int format(disk *diskptr)
     for (int i = 0; i < 128; i++)
     {
         inodes[i].valid = 0;
-        inodes[i].size = -1;
-        for (int j = 0; j < 5; j++)
-        {
-            inodes[i].direct[j] = -1;
-        }
-        inodes[i].indirect = -1;
     }
 
     // Write the inodes
@@ -182,11 +176,6 @@ int create_file()
 
     inode_ptr[inode_offset].valid = 1;
     inode_ptr[inode_offset].size = 0;
-    for (int i = 0; i < 5; i++)
-    {
-        inode_ptr->direct[i] = -1;
-    }
-    inode_ptr->indirect = -1;
 
     // Write the inode to disk
     if (write_block(mounted_disk, inode_idx, inode_ptr))
@@ -230,10 +219,10 @@ int remove_file(int inumber)
 
     // Clear the data bitmap
     int data_block_bitmap_idx = sb.data_block_bitmap_idx;
-    int file_size = inode_ptr[inode_offset].size;
+    int file_blocks = (int)ceil((double)inode_ptr[inode_offset].size / BLOCKSIZE);
 
     uint32_t *indirect_ptr = NULL;
-    for (int i = 0; i < file_size; i++)
+    for (int i = 0; i < file_blocks; i++)
     {
         if (i < 5)
         {
@@ -270,12 +259,7 @@ int remove_file(int inumber)
 
     // Free the inode
     inode_ptr[inode_offset].valid = 0;
-    inode_ptr[inode_offset].size = -1;
-    for (int i = 0; i < 5; i++)
-    {
-        inode_ptr->direct[i] = -1;
-    }
-    inode_ptr->indirect = -1;
+    inode_ptr[inode_offset].size = 0;
 
     // Write the inode to disk
     if (write_block(mounted_disk, inode_block_idx, inode_ptr))
@@ -290,6 +274,59 @@ int remove_file(int inumber)
         printf("{SFS} -- [ERROR] Failed to clear inode bitmap -- File not removed\n");
         return -1;
     }
+
+    return 0;
+}
+
+int stat(int inumber)
+{
+    if (mounted_disk == NULL)
+    {
+        printf("{SFS} -- [ERROR] Disk is not mounted -- File not stat\n");
+        return -1;
+    }
+
+    // Read the super block
+    super_block sb;
+    if (read_block(mounted_disk, 0, &sb))
+    {
+        printf("{SFS} -- [ERROR] Failed to read super block -- File not stat\n");
+        return -1;
+    }
+
+    // Read the inode
+    int inode_block_idx = sb.inode_block_idx + (inumber / 128);
+    int inode_offset = (inumber % 128);
+
+    inode *inode_ptr = (inode *)malloc(128 * sizeof(inode));
+    read_block(mounted_disk, inode_block_idx, inode_ptr);
+
+    // Check if the inode is valid
+    if (inode_ptr[inode_offset].valid == 0)
+    {
+        printf("{SFS} -- [ERROR] Inode is not valid -- File not stat\n");
+        return -1;
+    }
+
+    int blocks = (int)ceil((double)inode_ptr[inode_offset].size / BLOCKSIZE);
+    int direct_blocks = (blocks < 5) ? blocks : 5;
+    int indirect_blocks = blocks - direct_blocks;
+
+    printf("\
+    +---------------------[FILE STAT]---------------------+\n\
+    |                                                     |\n\
+    |  Valid:                              %8d       |\n\
+    |  File Size (Logical):                %8d       |\n\
+    |  Number of Data Blocks in use:       %8d       |\n\
+    |  Number of Direct Pointers in use:   %8d       |\n\
+    |  Number of Indirect Pointers in use: %8d       |\n\
+    |                                                     |\n\
+    +-----------------------------------------------------+\n",
+           inode_ptr[inode_offset].valid,
+           inode_ptr[inode_offset].size,
+           blocks,
+           direct_blocks,
+           indirect_blocks);
 
     return 0;
 }
