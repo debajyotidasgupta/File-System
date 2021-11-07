@@ -331,6 +331,53 @@ int stat(int inumber)
     return 0;
 }
 
+int fit_to_size(int inumber, int size)
+{
+    if (mounted_disk == NULL)
+    {
+        printf("{SFS} -- [ERROR] Disk is not mounted -- File not fit_to_size\n");
+        return -1;
+    }
+
+    // Read the super block
+    super_block sb;
+    if (read_block(mounted_disk, 0, &sb))
+    {
+        printf("{SFS} -- [ERROR] Failed to read super block -- File not fit_to_size\n");
+        return -1;
+    }
+
+    // Read the inode
+    int inode_block_idx = sb.inode_block_idx + (inumber / 128);
+    int inode_offset = (inumber % 128);
+
+    inode *inode_ptr = (inode *)malloc(128 * sizeof(inode));
+    if (read_block(mounted_disk, inode_block_idx, inode_ptr))
+    {
+        printf("{SFS} -- [ERROR] Failed to read inode from disk -- File not fit_to_size\n");
+        return -1;
+    }
+
+    // Check if the inode is valid
+    if (inode_ptr[inode_offset].valid == 0)
+    {
+        printf("{SFS} -- [ERROR] Inode is not valid -- File not fit_to_size\n");
+        return -1;
+    }
+
+    if (inode_ptr[inode_offset].size > size)
+    {
+        inode_ptr[inode_offset].size = size;
+        if (write_block(mounted_disk, inode_block_idx, inode_ptr))
+        {
+            printf("{SFS} -- [ERROR] Failed to write inode to disk -- File not fit_to_size\n");
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 void set(bitset *bitmap, int index)
 {
     int byte_index = index >> 3;
