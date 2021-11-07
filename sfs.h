@@ -46,3 +46,4 @@ void unset(bitset *bitmap, int index);
 int is_set(bitset *bitmap, int index);
 
 int find_free_inode();
+int clear_bitmap(int block, int bitmap_start);

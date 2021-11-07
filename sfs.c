@@ -149,53 +149,6 @@ int mount(disk *diskptr)
     return 0;
 }
 
-int find_free_inode()
-{
-    if (mounted_disk == NULL)
-    {
-        printf("{SFS} -- [ERROR] Disk is not mounted -- Failed to find free inode\n");
-        return -1;
-    }
-
-    // Read the super block
-    super_block sb;
-    if (read_block(mounted_disk, 0, &sb))
-    {
-        printf("{SFS} -- [ERROR] Failed to read super block -- Failed to find free inode\n");
-        return -1;
-    }
-
-    // Read the inode bit map
-    int IB = (sb.data_block_bitmap_idx - 1);
-    bitset *inode_bitmap = (bitset *)malloc(IB * BLOCKSIZE);
-    for (int i = 0; i < IB; i++)
-    {
-        if (read_block(mounted_disk, sb.inode_bitmap_block_idx + i, &inode_bitmap[i * BLOCKSIZE]))
-        {
-            printf("{SFS} -- [ERROR] Failed to read inode bitmap -- Failed to find free inode\n");
-            return -1;
-        }
-    }
-
-    // Find the first free inode
-    for (int i = 0; i < IB * BLOCKSIZE * 8; i++)
-    {
-        int index = (i / BLOCKSIZE) >> 3;
-        if (is_set(inode_bitmap[index * BLOCKSIZE], i & 7))
-        {
-            continue;
-        }
-        else
-        {
-            free(inode_bitmap);
-            return i;
-        }
-    }
-
-    free(inode_bitmap);
-    return -1;
-}
-
 int create_file()
 {
     if (mounted_disk == NULL)
@@ -245,6 +198,102 @@ int create_file()
     return 0;
 }
 
+int remove_file(int inumber)
+{
+    if (mounted_disk == NULL)
+    {
+        printf("{SFS} -- [ERROR] Disk is not mounted -- File not removed\n");
+        return -1;
+    }
+
+    // Read the super block
+    super_block sb;
+    if (read_block(mounted_disk, 0, &sb))
+    {
+        printf("{SFS} -- [ERROR] Failed to read super block -- File not removed\n");
+        return -1;
+    }
+
+    // Read the inode
+    int inode_block_idx = sb.inode_block_idx + (inumber / 128);
+    int inode_offset = (inumber % 128);
+
+    inode *inode_ptr = (inode *)malloc(128 * sizeof(inode));
+    read_block(mounted_disk, inode_block_idx, inode_ptr);
+
+    // Check if the inode is valid
+    if (inode_ptr[inode_offset].valid == 0)
+    {
+        printf("{SFS} -- [ERROR] Inode is not valid -- File not removed\n");
+        return -1;
+    }
+
+    // Clear the data bitmap
+    int data_block_bitmap_idx = sb.data_block_bitmap_idx;
+    int file_size = inode_ptr[inode_offset].size;
+
+    uint32_t *indirect_ptr = NULL;
+    for (int i = 0; i < file_size; i++)
+    {
+        if (i < 5)
+        {
+            if (clear_bitmap(inode_ptr[inode_offset].direct[i], data_block_bitmap_idx))
+            {
+                printf("{SFS} -- [ERROR] Failed to clear data bitmap -- File not removed\n");
+                return -1;
+            }
+        }
+        else
+        {
+            if (indirect_ptr == NULL)
+            {
+                indirect_ptr = (uint32_t *)malloc(BLOCKSIZE);
+                if (read_block(mounted_disk, sb.data_block_idx + inode_ptr[inode_offset].indirect, indirect_ptr))
+                {
+                    printf("{SFS} -- [ERROR] Failed to read indirect block -- File not removed\n");
+                    return -1;
+                }
+
+                if (clear_bitmap(inode_ptr[inode_offset].indirect, data_block_bitmap_idx))
+                {
+                    printf("{SFS} -- [ERROR] Failed to clear data bitmap -- File not removed\n");
+                    return -1;
+                }
+            }
+            if (clear_bitmap(indirect_ptr[i - 5], data_block_bitmap_idx))
+            {
+                printf("{SFS} -- [ERROR] Failed to clear data bitmap -- File not removed\n");
+                return -1;
+            }
+        }
+    }
+
+    // Free the inode
+    inode_ptr[inode_offset].valid = 0;
+    inode_ptr[inode_offset].size = -1;
+    for (int i = 0; i < 5; i++)
+    {
+        inode_ptr->direct[i] = -1;
+    }
+    inode_ptr->indirect = -1;
+
+    // Write the inode to disk
+    if (write_block(mounted_disk, inode_block_idx, inode_ptr))
+    {
+        printf("{SFS} -- [ERROR] Failed to write inode to disk -- File not removed\n");
+        return -1;
+    }
+
+    // Clere the inode bitmap
+    if (clear_bitmap(inumber, sb.inode_bitmap_block_idx))
+    {
+        printf("{SFS} -- [ERROR] Failed to clear inode bitmap -- File not removed\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 void set(bitset *bitmap, int index)
 {
     int byte_index = index >> 3;
@@ -266,4 +315,74 @@ int is_set(bitset *bitmap, int index)
     int byte_index = index >> 3;
     int bit_index = index & 7;
     return (bitmap[byte_index] & (1 << bit_index)) != 0;
+}
+
+int clear_bitmap(int block, int bitmap_start)
+{
+    int block_number = block / (8 * BLOCKSIZE);
+    int bit_number = block % (8 * BLOCKSIZE);
+
+    bitset *bitmap = (bitset *)malloc(BLOCKSIZE);
+    if (read_block(mounted_disk, bitmap_start + block_number, bitmap))
+    {
+        printf("{SFS} -- [ERROR] Failed to read bitmap -- Failed to clear bitmap\n");
+        return -1;
+    }
+
+    unset(bitmap, bit_number);
+
+    if (write_block(mounted_disk, bitmap_start + block_number, bitmap))
+    {
+        printf("{SFS} -- [ERROR] Failed to write bitmap -- Failed to clear bitmap\n");
+        return -1;
+    }
+
+    return 0;
+}
+
+int find_free_inode()
+{
+    if (mounted_disk == NULL)
+    {
+        printf("{SFS} -- [ERROR] Disk is not mounted -- Failed to find free inode\n");
+        return -1;
+    }
+
+    // Read the super block
+    super_block sb;
+    if (read_block(mounted_disk, 0, &sb))
+    {
+        printf("{SFS} -- [ERROR] Failed to read super block -- Failed to find free inode\n");
+        return -1;
+    }
+
+    // Read the inode bit map
+    int IB = (sb.data_block_bitmap_idx - 1);
+    bitset *inode_bitmap = (bitset *)malloc(IB * BLOCKSIZE);
+    for (int i = 0; i < IB; i++)
+    {
+        if (read_block(mounted_disk, sb.inode_bitmap_block_idx + i, &inode_bitmap[i * BLOCKSIZE]))
+        {
+            printf("{SFS} -- [ERROR] Failed to read inode bitmap -- Failed to find free inode\n");
+            return -1;
+        }
+    }
+
+    // Find the first free inode
+    for (int i = 0; i < IB * BLOCKSIZE * 8; i++)
+    {
+        int index = (i / BLOCKSIZE) >> 3;
+        if (is_set(inode_bitmap[index * BLOCKSIZE], i & 7))
+        {
+            continue;
+        }
+        else
+        {
+            free(inode_bitmap);
+            return i;
+        }
+    }
+
+    free(inode_bitmap);
+    return -1;
 }
