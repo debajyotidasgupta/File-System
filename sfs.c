@@ -402,7 +402,7 @@ int read_i(int inumber, char *data, int length, int offset)
         }
 
         int copy_length = ((offset % BLOCKSIZE) + length > BLOCKSIZE) ? BLOCKSIZE - (offset % BLOCKSIZE) : length;
-        strncpy(data, temp_data + (offset % BLOCKSIZE), copy_length);
+        memcpy(data, temp_data + (offset % BLOCKSIZE), copy_length);
         data += copy_length;
         length -= copy_length;
         offset += copy_length;
@@ -422,6 +422,7 @@ int read_i(int inumber, char *data, int length, int offset)
                 data_ptr++;
             }
     }
+    free(temp_data);
 
     return 0;
 }
