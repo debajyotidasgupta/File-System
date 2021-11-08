@@ -22,7 +22,6 @@ File Name       sfs.c
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/types.h>
 #include "disk.h"
 #include "sfs.h"
 
@@ -506,7 +505,7 @@ int write_i(int inumber, char *data, int length, int offset)
     char *indirect_pointer_block = NULL;
     while (length > 0)
     {
-        if (acquired_blocks == 0 && (data_ptr = find_free_data_block()) == -1)
+        if (acquired_blocks == 0 && (*data_ptr = find_free_data_block()) == -1)
         {
             break;
         }
@@ -591,7 +590,6 @@ void set(bitset *bitmap, int index)
     int byte_index = index >> 3;
     int bit_index = index & 7;
     bitmap[byte_index] |= (1 << bit_index);
-    return 0;
 }
 
 void unset(bitset *bitmap, int index)
@@ -599,7 +597,6 @@ void unset(bitset *bitmap, int index)
     int byte_index = index >> 3;
     int bit_index = index & 7;
     bitmap[byte_index] &= ~(1 << bit_index);
-    return 0;
 }
 
 int is_set(bitset *bitmap, int index)
@@ -668,7 +665,7 @@ int find_free_inode()
     for (int i = 0; i < IB * BLOCKSIZE * 8; i++)
     {
         int index = (i / BLOCKSIZE) >> 3;
-        if (is_set(inode_bitmap[index * BLOCKSIZE], i % (BLOCKSIZE * 8)))
+        if (is_set(&inode_bitmap[index * BLOCKSIZE], i % (BLOCKSIZE * 8)))
         {
             continue;
         }
@@ -717,7 +714,7 @@ int find_free_data_block()
     for (int i = 0; i < DB * BLOCKSIZE * 8; i++)
     {
         int index = (i / BLOCKSIZE) >> 3;
-        if (is_set(data_block_bitmap[index * BLOCKSIZE], i & (BLOCKSIZE * 8)))
+        if (is_set(&data_block_bitmap[index * BLOCKSIZE], i & (BLOCKSIZE * 8)))
         {
             continue;
         }
