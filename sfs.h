@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 const static uint32_t MAGIC = 12345;
+const static uint32_t MAX_FILE_SIZE = (4 + 1024) * 4096;
 
 typedef struct inode
 {
@@ -46,4 +47,5 @@ void unset(bitset *bitmap, int index);
 int is_set(bitset *bitmap, int index);
 
 int find_free_inode();
+int find_free_data_block();
 int clear_bitmap(int block, int bitmap_start);
