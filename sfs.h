@@ -37,10 +37,10 @@ int read_i(int inumber, char *data, int length, int offset);
 int write_i(int inumber, char *data, int length, int offset);
 int fit_to_size(int inumber, int size);
 
-// int read_file(char *filepath, char *data, int length, int offset);
-// int write_file(char *filepath, char *data, int length, int offset);
-// int create_dir(char *dirpath);
-// int remove_dir(char *dirpath);
+int read_file(char *filepath, char *data, int length, int offset);
+int write_file(char *filepath, char *data, int length, int offset);
+int create_dir(char *dirpath);
+int remove_dir(char *dirpath);
 
 void set(bitset *bitmap, int index);
 void unset(bitset *bitmap, int index);
@@ -49,3 +49,5 @@ int is_set(bitset *bitmap, int index);
 int find_free_inode();
 int find_free_data_block();
 int clear_bitmap(int block, int bitmap_start);
+
+int get_inumber(char *path);

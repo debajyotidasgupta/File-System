@@ -585,6 +585,26 @@ int write_i(int inumber, char *data, int length, int offset)
     return bytes_written;
 }
 
+int read_file(char *filepath, char *data, int length, int offset)
+{
+    int inumber = get_inumber(filepath);
+    if (inumber == -1)
+    {
+        printf("{SFS} -- [ERROR] File not found -- File not read\n");
+        return -1;
+    }
+
+    // Read data from the inode in data buffer
+    int bytes_read = read_inode(inumber, data, length, offset);
+    if (bytes_read == -1)
+    {
+        printf("{SFS} -- [ERROR] Failed to read file -- File not read\n");
+        return -1;
+    }
+
+    return bytes_read;
+}
+
 void set(bitset *bitmap, int index)
 {
     int byte_index = index >> 3;
@@ -727,4 +747,21 @@ int find_free_data_block()
 
     free(data_block_bitmap);
     return -1;
+}
+
+int get_inumber(char *filepath)
+{
+    if (mounted_disk == NULL)
+    {
+        printf("{SFS} -- [ERROR] Disk is not mounted -- Failed to get inumber\n");
+        return -1;
+    }
+
+    // Read the super block
+    super_block sb;
+    if (read_block(mounted_disk, 0, &sb))
+    {
+        printf("{SFS} -- [ERROR] Failed to read super block -- Failed to get inumber\n");
+        return -1;
+    }
 }
