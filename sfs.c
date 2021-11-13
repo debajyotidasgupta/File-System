@@ -26,6 +26,7 @@ File Name       sfs.c
 #include "sfs.h"
 
 disk *mounted_disk;
+int root_file_inode = 0;
 
 int format(disk *diskptr)
 {
@@ -139,6 +140,9 @@ int mount(disk *diskptr)
     }
 
     mounted_disk = diskptr;
+
+    // Create the root directory
+    root_file_inode = create_file();
     return 0;
 }
 
@@ -585,17 +589,132 @@ int write_i(int inumber, char *data, int length, int offset)
     return bytes_written;
 }
 
+int create_dir(char *dirpath)
+{
+    if (mounted_disk == NULL)
+    {
+        printf("{SFS} -- [ERROR] Disk is not mounted -- Directory not created\n");
+        return -1;
+    }
+
+    // Read the super block
+    super_block sb;
+    if (read_block(mounted_disk, 0, &sb))
+    {
+        printf("{SFS} -- [ERROR] Failed to read super block -- Directory not created\n");
+        return -1;
+    }
+
+    int parent_inumber = get_inumber(dirpath, 1);
+    if (parent_inumber == -1)
+    {
+        printf("{SFS} -- [ERROR] Directory not found -- Directory not created\n");
+        return -1;
+    }
+
+    if (dirpath[strlen(dirpath) - 1] != '/')
+    {
+        dirpath[strlen(dirpath) - 1] = '\0';
+    }
+
+    // Get the name of the directory to be created
+    char *dirname = (char *)malloc(MAX_FILENAME_LENGTH);
+    char *token = strtok(dirpath, "/");
+    while (token != NULL)
+    {
+        strcpy(dirname, token);
+        token = strtok(NULL, "/");
+    }
+
+    // Check if the directory already exists
+    if (find_file(sb.inode_block_idx, parent_inumber, dirname) != -1)
+    {
+        printf("{SFS} -- [ERROR] Directory already exists -- Directory not created\n");
+        return -1;
+    }
+
+    // Check if there is a free directory entry and Create the directory
+    dir_entry dir;
+    dir.inode_idx = create_file();
+    if (dir.inode_idx == -1)
+    {
+        printf("{SFS} -- [ERROR] No free space -- Directory not created\n");
+        return -1;
+    }
+
+    dir.type = 1;
+    dir.valid = 1;
+    strcpy(dir.name, dirname);
+    dir.name_len = strlen(dirname);
+
+    // read parent inode to compute offset
+    inode *parent_inode = (inode *)malloc(BLOCKSIZE);
+    int offset = parent_inumber % 128;
+
+    if (read_block(mounted_disk, sb.inode_block_idx + parent_inumber / 128, parent_inode))
+    {
+        printf("{SFS} -- [ERROR] Failed to read inode -- Directory not created\n");
+        return -1;
+    }
+
+    int file_size = parent_inode[offset].size;
+
+    dir_entry *block_data = (dir_entry *)malloc(BLOCKSIZE);
+    if (read_i(parent_inumber, block_data, BLOCKSIZE, 0))
+    {
+        printf("{SFS} -- [ERROR] Failed to read data block -- Directory not created\n");
+        return -1;
+    }
+
+    for (int i = 0; i < file_size / sizeof(dir_entry); i++)
+    {
+        if (block_data[i].valid == 0)
+        {
+            block_data[i] = dir;
+            if (write_i(parent_inumber, block_data, BLOCKSIZE, 0))
+            {
+                printf("{SFS} -- [ERROR] Failed to write data block -- Directory not created\n");
+                return -1;
+            }
+
+            free(block_data);
+            free(parent_inode);
+            return dir.inode_idx;
+        }
+    }
+
+    // Write the directory entry
+    if (write_i(parent_inumber, &dir, sizeof(dir_entry), file_size / sizeof(dir_entry)))
+    {
+        printf("{SFS} -- [ERROR] Failed to write data block -- Directory not created\n");
+
+        free(block_data);
+        free(parent_inode);
+        return -1;
+    }
+
+    free(block_data);
+    free(parent_inode);
+    return dir.inode_idx;
+}
+
 int read_file(char *filepath, char *data, int length, int offset)
 {
-    int inumber = get_inumber(filepath);
+    int inumber = get_inumber(filepath, 0);
     if (inumber == -1)
     {
         printf("{SFS} -- [ERROR] File not found -- File not read\n");
         return -1;
     }
 
+    if (data == NULL)
+    {
+        printf("{SFS} -- [ERROR] Invalid data pointer -- Failed Read File\n");
+        return -1;
+    }
+
     // Read data from the inode in data buffer
-    int bytes_read = read_inode(inumber, data, length, offset);
+    int bytes_read = read_i(inumber, data, length, offset);
     if (bytes_read == -1)
     {
         printf("{SFS} -- [ERROR] Failed to read file -- File not read\n");
@@ -749,7 +868,50 @@ int find_free_data_block()
     return -1;
 }
 
-int get_inumber(char *filepath)
+int find_file(int start_inode, int inumber, char *filename)
+{
+    // Read the inode
+    inode *in = (inode *)malloc(BLOCKSIZE);
+    int off = inumber % 128;
+
+    if (read_block(mounted_disk, start_inode + inumber / 128, in))
+    {
+        printf("{SFS} -- [ERROR] Failed to read inode -- Failed to get inumber\n");
+        return -1;
+    }
+
+    if (in[off].valid == 0)
+    {
+        printf("{SFS} -- [ERROR] Invalid inode -- Failed to get inumber\n");
+        return -1;
+    }
+
+    // Read the data block
+    dir_entry *dir = (dir_entry *)malloc(in[off].size);
+    int len = read_i(inumber, dir, in[off].size, 0);
+    free(in);
+
+    if (len < 0)
+    {
+        printf("{SFS} -- [ERROR] Failed to read data block -- Failed to get inumber\n");
+        return -1;
+    }
+
+    int num_entries = len / sizeof(dir_entry);
+    inumber = -1;
+    for (int j = 0; j < num_entries; j++)
+    {
+        if (strcmp(filename, dir[j].name) == 0)
+        {
+            inumber = dir[j].inode_idx;
+            break;
+        }
+    }
+
+    return inumber;
+}
+
+int get_inumber_parent(char *filepath, int parent)
 {
     if (mounted_disk == NULL)
     {
@@ -761,7 +923,86 @@ int get_inumber(char *filepath)
     super_block sb;
     if (read_block(mounted_disk, 0, &sb))
     {
-        printf("{SFS} -- [ERROR] Failed to read super block -- Failed to get inumber\n");
+        printf("{SFS} -- [ERROR] Failed to read super block -- Failed to find free inode\n");
         return -1;
     }
+
+    int start_inode = sb.inode_block_idx;
+
+    int n_parts;
+    char **files = path_parse(filepath, &n_parts);
+
+    if (files == NULL)
+    {
+        printf("{SFS} -- [ERROR] Failed to parse path -- Failed to get inumber\n");
+        return -1;
+    }
+
+    if (n_parts == 0)
+    {
+        if (files)
+            free(files);
+        printf("{SFS} -- [ERROR] Access to create or remove root directory is not allowed\n");
+        return -1;
+    }
+
+    int inumber = root_file_inode;
+    for (int i = 0; i < n_parts - parent; i++)
+    {
+        inumber = find_file(start_inode, inumber, files[i]);
+        if (inumber < 0)
+        {
+            printf("{SFS} -- [ERROR] File or Directory [%s] not found -- Failed to get inumber\n", files[i]);
+            free(files);
+            return -1;
+        }
+
+        free(files[i]);
+    }
+
+    free(files);
+    return inumber;
+}
+
+char **path_parse(char *path, int *n_parts)
+{
+    int path_len = strlen(path);
+
+    if (path_len > 1 && path[path_len - 1] == '/')
+    {
+        path[path_len - 1] = '\0';
+        path_len--;
+    }
+
+    if (path_len > 0 && path[0] == '/')
+    {
+        path++;
+        path_len--;
+    }
+    else
+    {
+        printf("{SFS} -- [ERROR] Invalid path -- Failed to parse path\n");
+        return NULL;
+    }
+
+    *n_parts = 1;
+    for (int i = 0; i < strlen(path); i++)
+    {
+        if (path[i] == '/')
+        {
+            (*n_parts)++;
+        }
+    }
+
+    char **path_array = (char **)malloc(sizeof(char *) * *n_parts);
+    char *token = strtok(path, "/");
+    int i = 0;
+    while (token != NULL)
+    {
+        path_array[i] = (char *)malloc(sizeof(char) * MAX_FILENAME_LENGTH);
+        strcpy(path_array[i], token);
+        token = strtok(NULL, "/");
+        i++;
+    }
+    return path_array;
 }

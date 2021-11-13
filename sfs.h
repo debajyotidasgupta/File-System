@@ -2,6 +2,7 @@
 
 const static uint32_t MAGIC = 12345;
 const static uint32_t MAX_FILE_SIZE = (4 + 1024) * 4096;
+const static uint32_t MAX_FILENAME_LENGTH = 256;
 
 typedef struct inode
 {
@@ -25,6 +26,15 @@ typedef struct super_block
 	uint32_t data_block_idx;		// Block number of the first data block
 	uint32_t data_blocks;			// Number of blocks reserved as data blocks
 } super_block;
+
+typedef struct dir_entry
+{
+	int valid;	   // unset when a file or directory is deleted and can be replace by some other entry later
+	int type;	   // 0 for file, 1 for directory
+	char *name;	   // name of the file or directory
+	int name_len;  // length of the name
+	int inode_idx; // index of the inode
+} dir_entry;
 
 typedef unsigned char bitset;
 
@@ -50,4 +60,6 @@ int find_free_inode();
 int find_free_data_block();
 int clear_bitmap(int block, int bitmap_start);
 
-int get_inumber(char *path);
+char **path_parse(char *path, int *n_parts);
+int get_inumber_parent(char *path, int parent);
+int find_file(int start_inode, int inumber, char *filename);
