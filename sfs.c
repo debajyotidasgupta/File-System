@@ -659,8 +659,8 @@ int create_dir(char *dirpath)
 
     int file_size = parent_inode[offset].size;
 
-    dir_entry *block_data = (dir_entry *)malloc(BLOCKSIZE);
-    if (read_i(parent_inumber, block_data, BLOCKSIZE, 0))
+    dir_entry *dir_files = (dir_entry *)malloc(file_size);
+    if (read_i(parent_inumber, dir_files, file_size, 0))
     {
         printf("{SFS} -- [ERROR] Failed to read data block -- Directory not created\n");
         return -1;
@@ -668,16 +668,16 @@ int create_dir(char *dirpath)
 
     for (int i = 0; i < file_size / sizeof(dir_entry); i++)
     {
-        if (block_data[i].valid == 0)
+        if (dir_files[i].valid == 0)
         {
-            block_data[i] = dir;
-            if (write_i(parent_inumber, block_data, BLOCKSIZE, 0))
+            dir_files[i] = dir;
+            if (write_i(parent_inumber, dir_files, file_size, 0))
             {
                 printf("{SFS} -- [ERROR] Failed to write data block -- Directory not created\n");
                 return -1;
             }
 
-            free(block_data);
+            free(dir_files);
             free(parent_inode);
             return dir.inode_idx;
         }
@@ -688,14 +688,101 @@ int create_dir(char *dirpath)
     {
         printf("{SFS} -- [ERROR] Failed to write data block -- Directory not created\n");
 
-        free(block_data);
+        free(dir_files);
         free(parent_inode);
         return -1;
     }
 
-    free(block_data);
+    free(dir_files);
     free(parent_inode);
     return dir.inode_idx;
+}
+
+int remove_dir(char *dirpath)
+{
+    if (mounted_disk == NULL)
+    {
+        printf("{SFS} -- [ERROR] Disk is not mounted -- Directory not created\n");
+        return -1;
+    }
+
+    // Read the super block
+    super_block sb;
+    if (read_block(mounted_disk, 0, &sb))
+    {
+        printf("{SFS} -- [ERROR] Failed to read super block -- Directory not created\n");
+        return -1;
+    }
+
+    int parent_inumber = get_inumber(dirpath, 1);
+    if (parent_inumber == -1)
+    {
+        printf("{SFS} -- [ERROR] Directory not found -- Directory not removed\n");
+        return -1;
+    }
+
+    if (dirpath[strlen(dirpath) - 1] != '/')
+    {
+        dirpath[strlen(dirpath) - 1] = '\0';
+    }
+
+    // Get the name of the directory to be created
+    char *dirname = (char *)malloc(MAX_FILENAME_LENGTH);
+    char *token = strtok(dirpath, "/");
+    while (token != NULL)
+    {
+        strcpy(dirname, token);
+        token = strtok(NULL, "/");
+    }
+
+    // Check if the directory already exists
+    if (find_file(sb.inode_block_idx, parent_inumber, dirname) < 0)
+    {
+        printf("{SFS} -- [ERROR] Directory does not exists -- Directory not removed\n");
+        return -1;
+    }
+
+    // read parent inode to compute offset
+    inode *parent_inode = (inode *)malloc(BLOCKSIZE);
+    int offset = parent_inumber % 128;
+
+    if (read_block(mounted_disk, sb.inode_block_idx + parent_inumber / 128, parent_inode))
+    {
+        printf("{SFS} -- [ERROR] Failed to read inode -- Directory not created\n");
+        return -1;
+    }
+
+    int file_size = parent_inode[offset].size;
+
+    dir_entry *dir_files = (dir_entry *)malloc(file_size);
+    if (read_i(parent_inumber, dir_files, file_size, 0))
+    {
+        printf("{SFS} -- [ERROR] Failed to read data block -- Directory not created\n");
+        return -1;
+    }
+
+    for (int i = 0; i < file_size / sizeof(dir_entry); i++)
+    {
+        if (strcmp(dirname, dir_files[i].name) == 0)
+        {
+            dir_files[i].valid = 0;
+            break;
+        }
+    }
+
+    // Write the directory entry
+    if (write_i(parent_inumber, dir_files, file_size, 0))
+    {
+        printf("{SFS} -- [ERROR] Failed to write data block -- Directory not created\n");
+
+        free(dir_files);
+        free(parent_inode);
+        return -1;
+    }
+
+    free(dir_files);
+    free(parent_inode);
+    return 0;
 }
 
 int read_file(char *filepath, char *data, int length, int offset)
