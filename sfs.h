@@ -61,5 +61,6 @@ int find_free_data_block();
 int clear_bitmap(int block, int bitmap_start);
 
 char **path_parse(char *path, int *n_parts);
-int get_inumber_parent(char *path, int parent);
+int get_inumber(char *path, int parent);
 int find_file(int start_inode, int inumber, char *filename);
+int recursive_remove(int start_inode, int inumber, int type);

@@ -660,7 +660,7 @@ int create_dir(char *dirpath)
     int file_size = parent_inode[offset].size;
 
     dir_entry *dir_files = (dir_entry *)malloc(file_size);
-    if (read_i(parent_inumber, dir_files, file_size, 0))
+    if (read_i(parent_inumber, (char *)dir_files, file_size, 0))
     {
         printf("{SFS} -- [ERROR] Failed to read data block -- Directory not created\n");
         return -1;
@@ -671,7 +671,7 @@ int create_dir(char *dirpath)
         if (dir_files[i].valid == 0)
         {
             dir_files[i] = dir;
-            if (write_i(parent_inumber, dir_files, file_size, 0))
+            if (write_i(parent_inumber, (char *)dir_files, file_size, 0))
             {
                 printf("{SFS} -- [ERROR] Failed to write data block -- Directory not created\n");
                 return -1;
@@ -684,7 +684,7 @@ int create_dir(char *dirpath)
     }
 
     // Write the directory entry
-    if (write_i(parent_inumber, &dir, sizeof(dir_entry), file_size / sizeof(dir_entry)))
+    if (write_i(parent_inumber, (char *)&dir, sizeof(dir_entry), file_size / sizeof(dir_entry)))
     {
         printf("{SFS} -- [ERROR] Failed to write data block -- Directory not created\n");
 
@@ -755,7 +755,7 @@ int remove_dir(char *dirpath)
     int file_size = parent_inode[offset].size;
 
     dir_entry *dir_files = (dir_entry *)malloc(file_size);
-    if (read_i(parent_inumber, dir_files, file_size, 0))
+    if (read_i(parent_inumber, (char *)dir_files, file_size, 0))
     {
         printf("{SFS} -- [ERROR] Failed to read data block -- Directory not created\n");
         return -1;
@@ -766,12 +766,17 @@ int remove_dir(char *dirpath)
         if (strcmp(dirname, dir_files[i].name) == 0)
         {
             dir_files[i].valid = 0;
+            if (recursive_remove(sb.inode_block_idx, dir_files[i].inode_idx, dir_files[i].type) < 0)
+            {
+                printf("{SFS} -- [ERROR] Failed to recursively remove directory -- Directory not removed\n");
+                return -1;
+            }
             break;
         }
     }
 
     // Write the directory entry
-    if (write_i(parent_inumber, dir_files, file_size, 0))
+    if (write_i(parent_inumber, (char *)dir_files, file_size, 0))
     {
         printf("{SFS} -- [ERROR] Failed to write data block -- Directory not created\n");
 
@@ -975,7 +980,7 @@ int find_file(int start_inode, int inumber, char *filename)
 
     // Read the data block
     dir_entry *dir = (dir_entry *)malloc(in[off].size);
-    int len = read_i(inumber, dir, in[off].size, 0);
+    int len = read_i(inumber, (char *)dir, in[off].size, 0);
     free(in);
 
     if (len < 0)
@@ -998,7 +1003,7 @@ int find_file(int start_inode, int inumber, char *filename)
     return inumber;
 }
 
-int get_inumber_parent(char *filepath, int parent)
+int get_inumber(char *filepath, int parent)
 {
     if (mounted_disk == NULL)
     {
@@ -1092,4 +1097,57 @@ char **path_parse(char *path, int *n_parts)
         i++;
     }
     return path_array;
+}
+
+int recursive_remove(int start_inode, int inumber, int type)
+{
+    if (type)
+    {
+        // This is a Directory, so remove recursvely
+
+        // Read the inode
+        inode *in = (inode *)malloc(BLOCKSIZE);
+        int off = inumber % 128;
+
+        if (read_block(mounted_disk, inumber / 128 + start_inode, in))
+        {
+            printf("{SFS} -- [ERROR] Failed to read inode -- Failed to get inumber\n");
+            return -1;
+        }
+
+        if (in[off].valid == 0)
+        {
+            printf("{SFS} -- [ERROR] Invalid inode -- Failed to get inumber\n");
+            return -1;
+        }
+
+        // Read the data block
+        dir_entry *dir = (dir_entry *)malloc(in[off].size);
+        int len = read_i(inumber, (char *)dir, in[off].size, 0);
+        free(in);
+
+        if (len < 0)
+        {
+            printf("{SFS} -- [ERROR] Failed to read data block -- Failed to get inumber\n");
+            return -1;
+        }
+
+        int num_entries = len / sizeof(dir_entry);
+        for (int j = 0; j < num_entries; j++)
+        {
+            if (dir[j].inode_idx != 0)
+            {
+                recursive_remove(start_inode, dir[j].inode_idx, dir[j].type);
+            }
+        }
+
+        free(dir);
+    }
+
+    if (remove_file(inumber) < 0)
+    {
+        printf("{SFS} -- [ERROR] Failed to remove file -- Failed to remove file\n");
+        return -1;
+    }
+    return 0;
 }
