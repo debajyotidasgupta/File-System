@@ -589,6 +589,53 @@ int write_i(int inumber, char *data, int length, int offset)
     return bytes_written;
 }
 
+int fit_to_size(int inumber, int size)
+{
+    if (mounted_disk == NULL)
+    {
+        printf("{SFS} -- [ERROR] Disk is not mounted -- File not fit_to_size\n");
+        return -1;
+    }
+
+    // Read the super block
+    super_block sb;
+    if (read_block(mounted_disk, 0, &sb))
+    {
+        printf("{SFS} -- [ERROR] Failed to read super block -- File not fit_to_size\n");
+        return -1;
+    }
+
+    // Read the inode
+    int inode_block_idx = sb.inode_block_idx + (inumber / 128);
+    int inode_offset = (inumber % 128);
+
+    inode *inode_ptr = (inode *)malloc(128 * sizeof(inode));
+    if (read_block(mounted_disk, inode_block_idx, inode_ptr))
+    {
+        printf("{SFS} -- [ERROR] Failed to read inode from disk -- File not fit_to_size\n");
+        return -1;
+    }
+
+    // Check if the inode is valid
+    if (inode_ptr[inode_offset].valid == 0)
+    {
+        printf("{SFS} -- [ERROR] Inode is not valid -- File not fit_to_size\n");
+        return -1;
+    }
+
+    if (inode_ptr[inode_offset].size > size)
+    {
+        inode_ptr[inode_offset].size = size;
+        if (write_block(mounted_disk, inode_block_idx, inode_ptr))
+        {
+            printf("{SFS} -- [ERROR] Failed to write inode to disk -- File not fit_to_size\n");
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 int create_dir(char *dirpath)
 {
     if (mounted_disk == NULL)
@@ -814,6 +861,115 @@ int read_file(char *filepath, char *data, int length, int offset)
     }
 
     return bytes_read;
+}
+
+int write_file(char *filepath, char *data, int length, int offset)
+{
+    int parent_inumber = get_inumber(filepath, 1);
+    if (parent_inumber == -1)
+    {
+        printf("{SFS} -- [ERROR] File not found -- File not written\n");
+        return -1;
+    }
+
+    if (data == NULL)
+    {
+        printf("{SFS} -- [ERROR] Invalid data pointer -- Failed Write File\n");
+        return -1;
+    }
+
+    // Read the super block
+    super_block sb;
+    if (read_block(mounted_disk, 0, &sb))
+    {
+        printf("{SFS} -- [ERROR] Failed to read super block -- File not written\n");
+        return -1;
+    }
+
+    if (filepath[strlen(filepath) - 1] != '/')
+    {
+        filepath[strlen(filepath) - 1] = '\0';
+    }
+
+    // Get the name of the File to be created
+    char *filename = (char *)malloc(MAX_FILENAME_LENGTH);
+    char *token = strtok(filepath, "/");
+    while (token != NULL)
+    {
+        strcpy(filename, token);
+        token = strtok(NULL, "/");
+    }
+
+    // Check if the File already exists
+    int inumber = -1;
+    if (find_file(sb.inode_block_idx, parent_inumber, filename) < 0)
+    {
+        if (inumber = create_file() < 0)
+        {
+            printf("{SFS} -- [ERROR] Failed to write file -- File not written\n");
+            return -1;
+        }
+    }
+
+    // Write data to the inode in data buffer
+    int bytes_written = write_i(inumber, data, length, offset);
+    if (bytes_written == -1)
+    {
+        printf("{SFS} -- [ERROR] Failed to write file -- File not written\n");
+        return -1;
+    }
+
+    dir_entry e;
+    e.inode_idx = inumber;
+    strcpy(e.name, filename);
+    e.name_len = strlen(filename);
+    e.type = 0;
+    e.valid = 1;
+
+    // Write the directory entry
+    inode *parent_inode = (inode *)malloc(BLOCKSIZE);
+    int off = parent_inumber % 128;
+    if (read_block(mounted_disk, sb.inode_block_idx + parent_inumber / 128, parent_inode))
+    {
+        printf("{SFS} -- [ERROR] Failed to read inode -- File not written\n");
+        return -1;
+    }
+
+    int file_size = parent_inode[off].size;
+
+    dir_entry *dir_files = (dir_entry *)malloc(file_size);
+    if (read_i(parent_inumber, (char *)dir_files, file_size, 0))
+    {
+        printf("{SFS} -- [ERROR] Failed to read data block -- File not written\n");
+        return -1;
+    }
+
+    for (int i = 0; i < file_size / sizeof(dir_entry); i++)
+    {
+        if (strcmp(filename, dir_files[i].name) == 0)
+        {
+            dir_files[i] = e;
+            if (write_i(parent_inumber, (char *)dir_files, file_size, 0))
+            {
+                printf("{SFS} -- [ERROR] Failed to write data block -- File not written\n");
+                return -1;
+            }
+            free(dir_files);
+            free(parent_inode);
+            return bytes_written;
+        }
+    }
+
+    // Add the directory entry
+    if (write_i(parent_inumber, (char *)dir_files, file_size, file_size / sizeof(dir_entry)))
+    {
+        printf("{SFS} -- [ERROR] Failed to write data block -- File not written\n");
+        return -1;
+    }
+
+    free(dir_files);
+    free(parent_inode);
+    return bytes_written;
 }
 
 void set(bitset *bitmap, int index)
