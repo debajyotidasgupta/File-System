@@ -34,7 +34,7 @@ disk *create_disk(int nbytes)
     diskptr->writes = 0;
     diskptr->blocks = (nbytes - STATSSIZE) / BLOCKSIZE;
 
-    diskptr->block_arr = malloc(sizeof(char **) * diskptr->blocks);
+    diskptr->block_arr = (char **)malloc(sizeof(char *) * diskptr->blocks);
     if (diskptr->block_arr == NULL)
     {
         printf("{DISK} -- [ERROR]: malloc failed ... No more space left to allocate\n");
@@ -43,7 +43,7 @@ disk *create_disk(int nbytes)
 
     for (int i = 0; i < diskptr->blocks; i++)
     {
-        diskptr->block_arr[i] = malloc(sizeof(char) * BLOCKSIZE);
+        diskptr->block_arr[i] = (char *)malloc(sizeof(char) * BLOCKSIZE);
         if (diskptr->block_arr[i] == NULL)
         {
             printf("{DISK} -- [ERROR]: malloc failed ... No more space left to allocate\n");
