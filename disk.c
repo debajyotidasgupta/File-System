@@ -58,7 +58,7 @@ int read_block(disk *diskptr, int blocknr, void *block_data)
 {
     if (blocknr < 0 || blocknr >= diskptr->blocks)
     {
-        printf("{DISK} -- [ERROR]: block number out of range\n");
+        printf("{DISK} -- [ERROR - READ]: block number [%d] out of range\n", blocknr);
         return -1;
     }
 
@@ -77,7 +77,7 @@ int write_block(disk *diskptr, int blocknr, void *block_data)
 {
     if (blocknr < 0 || blocknr >= diskptr->blocks)
     {
-        printf("{DISK} -- [ERROR]: block number out of range\n");
+        printf("{DISK} -- [ERROR - WRITE]: block number [%d] out of range\n", blocknr);
         return -1;
     }
 

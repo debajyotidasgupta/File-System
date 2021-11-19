@@ -25,8 +25,8 @@ File Name       sfs.c
 #include "disk.h"
 #include "sfs.h"
 
-disk *mounted_disk;
-super_block *sb;
+static disk *mounted_disk;
+static super_block *sb;
 int root_file_inode = -1;
 
 int format(disk *diskptr)
@@ -39,7 +39,7 @@ int format(disk *diskptr)
 
     int N = diskptr->blocks;
     int M = N - 1;
-    int I = (int)(0.1 * N);
+    int I = (int)(0.1 * M);
     int n_inodes = I * 128;
     int IB = (int)ceil(n_inodes / (8. * BLOCKSIZE));
 
@@ -276,8 +276,6 @@ int stat(int inumber)
         return -1;
     }
 
-    printf("{SFS} -- [INFO] File stat --- %d\n", inumber);
-
     // Read the inode
     int inode_block_idx = sb->inode_block_idx + (inumber / 128);
     int inode_offset = (inumber % 128);
@@ -338,71 +336,58 @@ int read_i(int inumber, char *data, int length, int offset)
     }
 
     // Check if the offset is valid
-    if (offset < 0 || offset > inode_ptr[inode_offset].size)
+    if (offset < 0 || offset >= inode_ptr[inode_offset].size)
     {
         printf("{SFS} -- [ERROR] Offset is not valid -- File not read\n");
         return -1;
     }
 
-    // Truncate the length if it is too long
-    if (length > inode_ptr[inode_offset].size - offset)
-    {
-        length = inode_ptr[inode_offset].size - offset;
-    }
-
     // Read the data
     int start_block = offset / BLOCKSIZE;
-    uint32_t *data_ptr = NULL;
 
-    if (start_block < 5)
-    {
-        data_ptr = inode_ptr[inode_offset].direct + start_block;
-    }
-    else
-    {
-        data_ptr = (uint32_t *)malloc(BLOCKSIZE);
-        if (read_block(mounted_disk, sb->data_block_idx + inode_ptr[inode_offset].indirect, data_ptr))
-        {
-            printf("{SFS} -- [ERROR] Failed to read indirect block -- File not read\n");
-            return -1;
-        }
-    }
+    //truncate the length if it is too long
+    int final_length = (length + offset > inode_ptr[inode_offset].size ? inode_ptr[inode_offset].size : length + offset);
+    int end_block = (final_length + BLOCKSIZE - 1) / BLOCKSIZE;
 
-    char *temp_data = (char *)malloc(BLOCKSIZE);
     int bytes_read = 0;
+    char *temp_data = (char *)malloc(BLOCKSIZE);
+    int32_t *indirect_ptr = (int32_t *)malloc(BLOCKSIZE);
+    int file_blocks = (int)ceil((double)inode_ptr[inode_offset].size / BLOCKSIZE);
 
-    while (length > 0)
+    if (file_blocks > 5)
+        read_block(mounted_disk, sb->data_block_idx + inode_ptr[inode_offset].indirect, (char *)indirect_ptr);
+
+    int data_offset = 0;
+    for (int i = start_block; i < end_block; i++)
     {
-        if (read_block(mounted_disk, sb->data_block_idx + *data_ptr, temp_data))
+        if (i < 5)
         {
-            printf("{SFS} -- [ERROR] Failed to read data block -- File not read\n");
-            return -1;
+            if (read_block(mounted_disk, sb->data_block_idx + inode_ptr[inode_offset].direct[i], temp_data))
+            {
+                printf("{SFS} -- [ERROR] Failed to read data block -- File not read\n");
+                return -1;
+            }
+        }
+        else
+        {
+            if (read_block(mounted_disk, indirect_ptr[i - 5], temp_data))
+            {
+                printf("{SFS} -- [ERROR] Failed to read data block -- File not read\n");
+                return -1;
+            }
         }
 
-        int copy_length = ((offset % BLOCKSIZE) + length > BLOCKSIZE) ? BLOCKSIZE - (offset % BLOCKSIZE) : length;
-        memcpy(data, temp_data + (offset % BLOCKSIZE), copy_length);
-        data += copy_length;
-        length -= copy_length;
+        int copy_length = (i == end_block - 1 ? final_length : BLOCKSIZE - offset % BLOCKSIZE);
+        memcpy(data + data_offset, temp_data + offset % BLOCKSIZE, copy_length);
+
+        data_offset += copy_length;
         offset += copy_length;
         bytes_read += copy_length;
-
-        if (length > 0)
-            if (data_ptr == inode_ptr[inode_offset].direct + 4)
-            {
-                data_ptr = (uint32_t *)malloc(BLOCKSIZE);
-                if (read_block(mounted_disk, sb->data_block_idx + inode_ptr[inode_offset].indirect, data_ptr))
-                {
-                    printf("{SFS} -- [ERROR] Failed to read indirect block -- File not read\n");
-                    return -1;
-                }
-            }
-            else
-            {
-                data_ptr++;
-            }
+        final_length -= copy_length;
     }
+
     free(temp_data);
-    free(data_ptr);
+    free(indirect_ptr);
 
     return bytes_read;
 }
@@ -430,127 +415,83 @@ int write_i(int inumber, char *data, int length, int offset)
     }
 
     // Check if the offset is valid
-    if (offset < 0 || offset > inode_ptr[inode_offset].size)
+    if (offset < 0)
     {
         printf("{SFS} -- [ERROR] Offset is not valid -- File not write\n");
         return -1;
     }
 
-    // Truncate the length if it is too long
-    if (length > MAX_FILE_SIZE - offset)
-    {
-        length = MAX_FILE_SIZE - offset;
-    }
-
-    // Write the data
+    // Read the data
     int start_block = offset / BLOCKSIZE;
-    int acquired_blocks = ((inode_ptr[inode_offset].size + BLOCKSIZE - 1) / BLOCKSIZE) - start_block;
-    if (acquired_blocks < 0)
-        acquired_blocks = 0;
-    uint32_t *data_ptr = NULL;
 
-    if (start_block < 5)
+    //truncate the length if it is too long
+    int final_length = (length + offset > MAX_FILE_SIZE ? MAX_FILE_SIZE : length + offset);
+    int end_block = (final_length + BLOCKSIZE - 1) / BLOCKSIZE;
+    int32_t *indirect_ptr = (int32_t *)malloc(BLOCKSIZE);
+
+    int file_blocks = (inode_ptr[inode_offset].size + BLOCKSIZE - 1) / BLOCKSIZE;
+    int req_blocks = (final_length + BLOCKSIZE - 1) / BLOCKSIZE;
+    inode_ptr[inode_offset].size = final_length;
+    write_block(mounted_disk, inode_block_idx, inode_ptr);
+
+    if (file_blocks < req_blocks)
     {
-        data_ptr = inode_ptr[inode_offset].direct + start_block;
-    }
-    else
-    {
-        if (acquired_blocks && (inode_ptr[inode_offset].indirect = find_free_data_block()) == -1)
+        for (int i = file_blocks + 1; i <= req_blocks; i++)
         {
-            return 0;
-        }
-
-        data_ptr = (uint32_t *)malloc(BLOCKSIZE);
-        if (read_block(mounted_disk, sb->data_block_idx + inode_ptr[inode_offset].indirect, data_ptr))
-        {
-            printf("{SFS} -- [ERROR] Failed to read indirect block -- File not write\n");
-            return -1;
-        }
-    }
-
-    char *temp_data = (char *)malloc(BLOCKSIZE);
-    int bytes_written = 0;
-
-    char *indirect_pointer_block = NULL;
-    while (length > 0)
-    {
-        if (acquired_blocks == 0 && (*data_ptr = find_free_data_block()) == -1)
-        {
-            break;
-        }
-
-        if (read_block(mounted_disk, sb->data_block_idx + *data_ptr, temp_data))
-        {
-            printf("{SFS} -- [ERROR] Failed to read data block -- File not write\n");
-            return -1;
-        }
-
-        if (read_block(mounted_disk, sb->data_block_idx + *data_ptr, temp_data))
-        {
-            printf("{SFS} -- [ERROR] Failed to read data block -- File not write\n");
-            return -1;
-        }
-        int copy_length = ((offset % BLOCKSIZE) + length > BLOCKSIZE) ? BLOCKSIZE - (offset % BLOCKSIZE) : length;
-        memcpy(temp_data + (offset % BLOCKSIZE), data + (offset % BLOCKSIZE), copy_length);
-        if (write_block(mounted_disk, sb->data_block_idx + *data_ptr, temp_data))
-        {
-            printf("{SFS} -- [ERROR] Failed to write data block -- File not write\n");
-            return -1;
-        }
-
-        data += copy_length;
-        length -= copy_length;
-        offset += copy_length;
-        bytes_written += copy_length;
-
-        if (length > 0)
-            if (data_ptr == inode_ptr[inode_offset].direct + 4)
-            {
-                if (acquired_blocks == 0 && (inode_ptr[inode_offset].indirect = find_free_data_block()) == -1)
-                {
-                    break;
-                }
-
-                data_ptr = (uint32_t *)malloc(BLOCKSIZE);
-                indirect_pointer_block = (char *)data_ptr;
-                if (read_block(mounted_disk, sb->data_block_idx + inode_ptr[inode_offset].indirect, data_ptr))
-                {
-                    printf("{SFS} -- [ERROR] Failed to read indirect block -- File not write\n");
-                    return -1;
-                }
-            }
+            if (i < 5)
+                inode_ptr[inode_offset].direct[i] = find_free_data_block();
             else
             {
-                data_ptr++;
+                if (i == 5)
+                {
+                    inode_ptr[inode_offset].indirect = find_free_data_block();
+                    write_block(mounted_disk, inode_block_idx, inode_ptr);
+                }
+                read_block(mounted_disk, sb->data_block_idx + inode_ptr[inode_offset].indirect, (char *)indirect_ptr);
+                indirect_ptr[i - 5] = find_free_data_block();
+                write_block(mounted_disk, sb->data_block_idx + inode_ptr[inode_offset].indirect, (char *)indirect_ptr);
             }
-        if (acquired_blocks > 0)
-            acquired_blocks--;
-    }
-
-    // Write the indirect pointer block (if it exists)
-    if (indirect_pointer_block != NULL)
-    {
-        if (write_block(mounted_disk, sb->data_block_idx + inode_ptr[inode_offset].indirect, indirect_pointer_block))
-        {
-            printf("{SFS} -- [ERROR] Failed to write indirect block -- File not write\n");
-            free(indirect_pointer_block);
-            return -1;
         }
-        free(indirect_pointer_block);
     }
 
-    inode_ptr[inode_offset].size += bytes_written;
+    int bytes_written = 0, data_offset = 0;
+    char *temp_data = (char *)malloc(BLOCKSIZE);
+    read_block(mounted_disk, sb->data_block_idx + inode_ptr[inode_offset].indirect, (char *)indirect_ptr);
 
-    // Write the inode
-    if (write_block(mounted_disk, inode_block_idx, inode_ptr))
+    for (int i = start_block; i < end_block; i++)
     {
-        printf("{SFS} -- [ERROR] Failed to write inode -- File not write\n");
-        return -1;
+        if (i < 5)
+        {
+            if (read_block(mounted_disk, sb->data_block_idx + inode_ptr[inode_offset].direct[i], temp_data))
+            {
+                printf("{SFS} -- [ERROR] Failed to read direct data block -- File not written\n");
+                return -1;
+            }
+        }
+        else
+        {
+            if (read_block(mounted_disk, indirect_ptr[i - 5], temp_data))
+            {
+                printf("{SFS} -- [ERROR] Failed to read indirect data block -- File not written\n");
+                return -1;
+            }
+        }
+
+        int copy_length = (i == end_block - 1 ? final_length : BLOCKSIZE - offset % BLOCKSIZE);
+        memcpy(temp_data + offset % BLOCKSIZE, data + data_offset, copy_length);
+        if (i < 5)
+            write_block(mounted_disk, sb->data_block_idx + inode_ptr[inode_offset].direct[i], temp_data);
+        else
+            write_block(mounted_disk, indirect_ptr[i - 5], temp_data);
+        data_offset += copy_length;
+        offset += copy_length;
+        bytes_written += copy_length;
+        final_length -= copy_length;
     }
 
     free(temp_data);
+    free(indirect_ptr);
     free(inode_ptr);
-
     return bytes_written;
 }
 
@@ -962,7 +903,7 @@ int find_free_inode()
     }
 
     // Read the inode bit map
-    int IB = (sb->data_block_bitmap_idx - sb->inode_bitmap_block_idx);
+    int IB = (int)ceil((double)sb->inodes / (BLOCKSIZE * 8));
     bitset *inode_bitmap = (bitset *)malloc(IB * BLOCKSIZE);
     for (int i = 0; i < IB; i++)
     {
@@ -1013,10 +954,11 @@ int find_free_data_block()
     }
 
     // Read the data block bit map
-    int DB = (sb->data_block_bitmap_idx - sb->data_block_idx);
-    bitset *data_block_bitmap = (bitset *)malloc(DB * BLOCKSIZE);
+    int DB = sb->data_blocks;
+    int DBB = (int)ceil((double)DB / (BLOCKSIZE * 8));
+    bitset *data_block_bitmap = (bitset *)malloc(DBB * BLOCKSIZE);
 
-    for (int i = 0; i < DB; i++)
+    for (int i = 0; i < DBB; i++)
     {
         if (read_block(mounted_disk, sb->data_block_bitmap_idx + i, data_block_bitmap + i * BLOCKSIZE))
         {
@@ -1027,10 +969,10 @@ int find_free_data_block()
     }
 
     // Find the first free data block
-    for (int i = 0; i < DB * BLOCKSIZE * 8; i++)
+    for (int i = 0; i < DB; i++)
     {
         int index = (i / BLOCKSIZE) >> 3;
-        if (is_set(data_block_bitmap + index * BLOCKSIZE, i & (BLOCKSIZE * 8)))
+        if (is_set(data_block_bitmap + index * BLOCKSIZE, i % (BLOCKSIZE * 8)))
         {
             continue;
         }
@@ -1041,9 +983,9 @@ int find_free_data_block()
             int bit_offset = i % (BLOCKSIZE * 8);
 
             set(data_block_bitmap + bit_idx, bit_offset);
-            if (write_block(mounted_disk, sb->inode_bitmap_block_idx + bit_idx, data_block_bitmap + bit_idx))
+            if (write_block(mounted_disk, sb->data_block_bitmap_idx + bit_idx, data_block_bitmap + bit_idx))
             {
-                printf("{SFS} -- [ERROR] Failed to write inode bitmap to disk\n");
+                printf("{SFS} -- [ERROR] Failed to write data block bitmap to disk\n");
                 return -1;
             }
 

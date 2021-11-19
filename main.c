@@ -15,7 +15,7 @@ void print_dir_entry(dir_entry *info)
 
 int print_err(disk *diskptr, int test)
 {
-	printf("TEST %d failed. TERMINATING..\n", test);
+	printf("TEST %d: \033[1;31mFAILED\033[0m. TERMINATING..\n", test);
 	if (diskptr)
 		return free_disk(diskptr);
 	exit(0);
@@ -23,7 +23,7 @@ int print_err(disk *diskptr, int test)
 
 void print_pass(int test)
 {
-	printf("TEST %d : PASSED\n", test);
+	printf("TEST %d: \033[1;32mPASSED\033[0m\n", test);
 }
 
 void print_str(char *x, int len)
@@ -45,6 +45,18 @@ int compare(char *x, char *y, int len)
 	return 0;
 }
 
+void print_data_block(int block, disk *diskptr)
+{
+	super_block *sb = (super_block *)malloc(sizeof(super_block));
+	read_block(diskptr, 0, sb);
+
+	int data_block_start = sb->data_block_idx;
+	char *data_block = (char *)malloc(BLOCKSIZE);
+	if (read_block(diskptr, data_block_start + block, data_block) == -1)
+		return;
+	printf("\n\n [DATABLOCK] \n %s \n\n", data_block);
+}
+
 int main()
 {
 	int test_no = 1;
@@ -52,12 +64,6 @@ int main()
 	int DISKSIZE = 100 * 4096 + 24; //creating disk of size 100 BLOCKS + 24 bytes
 
 	disk *test = create_disk(DISKSIZE);
-
-	if (!test)
-	{
-		printf("TEST %d failed. Terminating..\n", test_no);
-		return 0;
-	}
 	print_pass(test_no);
 	test_no++;
 
@@ -106,8 +112,6 @@ int main()
 	print_pass(test_no);
 	test_no++;
 
-	printf("{INFO} : inumber = %d\n", inumber);
-
 	printf("TEST %d : -------------------------CHECKING STAT----------------------------\n", test_no);
 	if (stat(inumber) < 0)
 		return print_err(test, test_no);
@@ -124,7 +128,7 @@ int main()
 	char str5[17];
 
 	printf("TEST %d: ------------------------ TESTING READ_I---------------------------\n", test_no);
-	if (read_i(inumber, str5, 17, 0) < 0) //|| compare(str4, str5, 17) != 0)
+	if (read_i(inumber, str5, 17, 0) < 0 || compare(str4, str5, 17) != 0)
 		return print_err(test, test_no);
 	print_pass(test_no);
 	printf("Read: "); //should be "India fantastic!!"
@@ -132,6 +136,7 @@ int main()
 	test_no++;
 
 	char str6[3];
+
 	printf("TEST %d: ------------------------ TESTING READ_I---------------------------\n", test_no);
 	if (read_i(inumber, str6, 3, 1) < 0 || compare(str4 + 1, str6, 3) != 0)
 		return print_err(test, test_no);
@@ -157,7 +162,7 @@ int main()
 	char str7[BLOCKSIZE * 6]; //large data
 	str1[4095] = 'x';		  //str1 is now "testingtesting.....testingx"
 	for (int i = 0; i < 6; i++)
-		memcpy(str7 + i * BLOCKSIZE, str7, 4096);
+		memcpy(str7 + i * BLOCKSIZE, str1, 4096);
 
 	printf("TEST %d: -------------------------CREATING FILE----------------------------\n", test_no);
 	int inumber2 = create_file();
@@ -191,12 +196,15 @@ int main()
 	test_no++;
 
 	char str9[6] = "canada";
+
 	char str10[6];
 	printf("TEST %d: ------------------------TESTING WRITE_I---------------------------\n", test_no);
 	if (write_i(inumber2, str9, 6, 6 * 4096 - 3) < 0) //writing canada from 3rd last byte of previous data written in inode 2
 		return print_err(test, test_no);
 	print_pass(test_no);
 	test_no++;
+
+	printf("\n\n[DEBUG] : str9 = %s\n\n", str9);
 
 	printf("TEST %d: ------------------------ TESTING READ_I---------------------------\n", test_no);
 	if (read_i(inumber2, str10, 6, 6 * 4096 - 3) < 0 || compare(str9, str10, 6) != 0)
