@@ -1,8 +1,8 @@
 #include <stdint.h>
 
-const static uint32_t MAGIC = 12345;
-const static uint32_t MAX_FILE_SIZE = (4 + 1024) * 4096;
-const static uint32_t MAX_FILENAME_LENGTH = 256;
+const static uint32_t MAGIC = 12345;					 // Magic number
+const static uint32_t MAX_FILE_SIZE = (5 + 1024) * 4096; // Maximum file size is 4KB + 1KB
+const static uint32_t MAX_FILENAME_LENGTH = 256;		 // Maximum filename length
 
 typedef struct inode
 {
@@ -62,5 +62,11 @@ int clear_bitmap(int block, int bitmap_start);
 
 char **path_parse(char *path, int *n_parts);
 int get_inumber(char *path, int parent);
-int find_file(int start_inode, int inumber, char *filename);
-int recursive_remove(int start_inode, int inumber, int type);
+int find_file(int inumber, char *filename);
+int recursive_create(char **dirs, int nun);
+int recursive_remove(int inumber, int type);
+void free_data_block(int block_idx);
+void free_inode(int inumber);
+
+void print_dir_entry(int inumber);
+int validate_path(char **path, int n_parts);

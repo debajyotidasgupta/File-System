@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-void print_dir_entry(dir_entry *info)
+void print_dir(dir_entry *info)
 {
 	printf("File name  : %s\n", info->name);
 	printf("File type  : %d\n", info->type);
@@ -370,7 +370,7 @@ int main()
 	if (read_file(dir, (char *)(&info), sizeof(dir_entry), 0) < 0)
 		return print_err(test, test_no);
 	print_pass(test_no);
-	print_dir_entry(&info); //should have the filename dir1
+	print_dir(&info); //should have the filename dir1
 	test_no++;
 
 	printf("TEST %d: -----------------------REMOVING DIRECTORY-------------------------\n", test_no);
