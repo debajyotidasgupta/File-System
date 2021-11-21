@@ -67,6 +67,4 @@ int recursive_create(char **dirs, int nun);
 int recursive_remove(int inumber, int type);
 void free_data_block(int block_idx);
 void free_inode(int inumber);
-
-void print_dir_entry(int inumber);
 int validate_path(char **path, int n_parts);

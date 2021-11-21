@@ -145,16 +145,9 @@ int mount(disk *diskptr)
     mounted_disk = diskptr;
 
     // Create the root directory
-    create_file();
+    root_file_inode = create_file();
     return 0;
 }
-
-/**
- * @brief Create a file object
- * @details Creates a file object and initializes it.
- * 
- * @return int 
- */
 
 int create_file()
 {
@@ -300,7 +293,7 @@ int stat(int inumber)
     int direct_blocks = (blocks < 5) ? blocks : 5;
     int indirect_blocks = blocks - direct_blocks;
 
-    printf("\
+    printf("\n\
     +---------------------[FILE STAT]---------------------+\n\
     |                                                     |\n\
     |  Valid:                              %8d       |\n\
@@ -309,7 +302,7 @@ int stat(int inumber)
     |  Number of Direct Pointers in use:   %8d       |\n\
     |  Number of Indirect Pointers in use: %8d       |\n\
     |                                                     |\n\
-    +-----------------------------------------------------+\n",
+    +-----------------------------------------------------+\n\n",
            inode_ptr[inode_offset].valid,
            inode_ptr[inode_offset].size,
            blocks,
@@ -513,10 +506,13 @@ int write_i(int inumber, char *data, int length, int offset)
 
         int copy_length = (i == end_block - 1 ? length : BLOCKSIZE - offset % BLOCKSIZE);
         memcpy(temp_data + offset % BLOCKSIZE, data + data_offset, copy_length);
+
         if (i < 5)
             write_block(mounted_disk, sb->data_block_idx + inode_ptr[inode_offset].direct[i], temp_data);
         else
             write_block(mounted_disk, sb->data_block_idx + indirect_ptr[i - 5], temp_data);
+
+        // printf("\033[1;35m[DEBUG]\033[0m Written [%5d] bytes to block [%2d] at offset [%5d]\n", copy_length, i, offset % BLOCKSIZE);
         data_offset += copy_length;
         offset += copy_length;
         bytes_written += copy_length;
@@ -714,8 +710,8 @@ int remove_dir(char *dirpath)
     free(parent_inode);
     return 0;
 }
-
 int read_file(char *filepath, char *data, int length, int offset)
+
 {
     int inumber = get_inumber(filepath, 0);
     if (inumber == -1)
@@ -769,7 +765,7 @@ int write_file(char *filepath, char *data, int length, int offset)
 
     // Check if the File already exists
     int inumber = -1;
-    if (find_file(parent_inumber, filename) < 0)
+    if ((inumber = find_file(parent_inumber, filename)) < 0)
     {
         if ((inumber = create_file()) < 0)
         {
@@ -1174,7 +1170,6 @@ int recursive_create(char **dirs, int nun)
                 if (dir_files[i].valid == 0)
                 {
                     dir_files[i] = *dir;
-                    printf("{SFS} -- [INFO] parent inode: %d %s\n", inumber, dirs[x]);
                     if (write_i(inumber, (char *)dir_files, file_size, 0) < 0)
                     {
                         printf("{SFS} -- [ERROR] Failed to write data block -- Directory not created\n");
@@ -1315,43 +1310,4 @@ void free_inode(int inumber)
     read_block(mounted_disk, bit_inumber + sb->inode_bitmap_block_idx, bit_block);
     unset(bit_block, bit_offset);
     write_block(mounted_disk, bit_inumber + sb->inode_bitmap_block_idx, bit_block);
-}
-
-void print_dir_entry(int inumber)
-{
-    if (inumber < 0)
-    {
-        printf("{SFS} -- [ERROR] Invalid inumber -- Failed to print directory\n");
-        return;
-    }
-
-    inode *in = (inode *)malloc(BLOCKSIZE);
-    int off = inumber % 128;
-    read_block(mounted_disk, inumber / 128 + sb->inode_block_idx, in);
-
-    dir_entry *dir = (dir_entry *)malloc(in[off].size);
-    int len = read_i(inumber, (char *)dir, in[off].size, 0);
-    free(in);
-
-    if (len < 0)
-    {
-        printf("{SFS} -- [ERROR] Failed to read data block -- Failed to print directory\n");
-        return;
-    }
-
-    int num_entries = len / sizeof(dir_entry);
-
-    printf("\n+-----------------------------------+\n");
-    printf("|             INODE %2d              |\n", inumber);
-    printf("+-----------------------------------+\n");
-    printf("|  NAME |    TYPE   | VALID | INODE |\n");
-    printf("+-----------------------------------+\n");
-    for (int i = 0; i < num_entries; i++)
-    {
-        if (dir[i].valid == 1)
-        {
-            printf("| %5s | %9s | %5d | %5d |\n", dir[i].name, dir[i].type == 1 ? "Directory" : "File", dir[i].valid, dir[i].inode_idx);
-        }
-    }
-    printf("+-----------------------------------+\n\n");
 }
